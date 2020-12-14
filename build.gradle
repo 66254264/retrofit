@@ -4,9 +4,10 @@ import org.gradle.internal.jvm.Jvm
 buildscript {
   ext.versions = [
       'kotlin': '1.3.50',
-      'okhttp': '3.14.7',
+      'okhttp': '3.14.9',
       'protobuf': '3.10.0',
       'jaxb': '2.3.1',
+      'robovm': '2.3.9',
   ]
   ext.deps = [
       'kotlinStdLib': "org.jetbrains.kotlin:kotlin-stdlib:${versions.kotlin}",
@@ -22,10 +23,11 @@ buildscript {
       'androidxTestRunner': 'androidx.test:runner:1.1.0',
       'rxjava': 'io.reactivex:rxjava:1.3.8',
       'rxjava2': 'io.reactivex.rxjava2:rxjava:2.0.0',
+      'rxjava3': 'io.reactivex.rxjava3:rxjava:3.0.0',
       'reactiveStreams': 'org.reactivestreams:reactive-streams:1.0.3',
       'scalaLibrary': 'org.scala-lang:scala-library:2.13.1',
       'gson': 'com.google.code.gson:gson:2.8.5',
-      'jacksonDatabind': 'com.fasterxml.jackson.core:jackson-databind:2.10.1',
+      'jacksonDatabind': 'com.fasterxml.jackson.core:jackson-databind:2.10.5.1',
       'jaxbApi': "javax.xml.bind:jaxb-api:${versions.jaxb}",
       'jaxbImpl': "org.glassfish.jaxb:jaxb-runtime:${versions.jaxb}",
       'moshi': 'com.squareup.moshi:moshi:1.8.0',
@@ -33,6 +35,7 @@ buildscript {
       'simpleXml': 'org.simpleframework:simple-xml:2.7.1',
       'wireRuntime': 'com.squareup.wire:wire-runtime:2.2.0',
       'jsoup': 'org.jsoup:jsoup:1.12.1',
+      'robovm': "com.mobidevelop.robovm:robovm-rt:${versions.robovm}",
   ]
 
   dependencies {
@@ -42,7 +45,8 @@ buildscript {
     classpath 'com.vanniktech:gradle-maven-publish-plugin:0.9.0'
     classpath 'com.google.protobuf:protobuf-gradle-plugin:0.8.12'
     classpath 'ru.vyarus:gradle-animalsniffer-plugin:1.5.0'
-    classpath 'gradle.plugin.com.github.sherter.google-java-format:google-java-format-gradle-plugin:0.8'
+    classpath 'gradle.plugin.com.github.sherter.google-java-format:google-java-format-gradle-plugin:0.9'
+    classpath "com.mobidevelop.robovm:robovm-gradle-plugin:${versions.robovm}"
   }
   repositories {
     mavenCentral()
@@ -59,29 +63,28 @@ subprojects {
     jcenter()
   }
 
-  // Error-prone only works on JDK 11 or older currently.
-  if (!Jvm.current().javaVersion.isJava12Compatible()) {
-    apply plugin: 'net.ltgt.errorprone'
+  tasks.withType(JavaCompile).configureEach { task ->
+    task.options.encoding = 'UTF-8'
+    task.sourceCompatibility = JavaVersion.VERSION_1_8
+    task.targetCompatibility = JavaVersion.VERSION_1_8
+  }
 
-    dependencies {
-      errorproneJavac 'com.google.errorprone:javac:9+181-r4173-1'
-      errorprone 'com.google.errorprone:error_prone_core:2.3.3'
-    }
+  apply plugin: 'net.ltgt.errorprone'
 
-    tasks.withType(JavaCompile).configureEach { task ->
-      task.options.encoding = 'UTF-8'
-      task.sourceCompatibility = JavaVersion.VERSION_1_8
-      task.targetCompatibility = JavaVersion.VERSION_1_8
+  dependencies {
+    errorproneJavac 'com.google.errorprone:javac:9+181-r4173-1'
+    errorprone 'com.google.errorprone:error_prone_core:2.4.0'
+  }
 
-      task.options.errorprone {
-        excludedPaths = '.*/build/generated/source/proto/.*'
-        check('MissingFail', CheckSeverity.ERROR)
-        check('MissingOverride', CheckSeverity.ERROR)
-        check('UnusedException', CheckSeverity.ERROR)
-        check('UnusedMethod', CheckSeverity.ERROR)
-        check('UnusedNestedClass', CheckSeverity.ERROR)
-        check('UnusedVariable', CheckSeverity.ERROR)
-      }
+  tasks.withType(JavaCompile).configureEach { task ->
+    task.options.errorprone {
+      excludedPaths = '.*/build/generated/source/proto/.*'
+      check('MissingFail', CheckSeverity.ERROR)
+      check('MissingOverride', CheckSeverity.ERROR)
+      check('UnusedException', CheckSeverity.ERROR)
+      check('UnusedMethod', CheckSeverity.ERROR)
+      check('UnusedNestedClass', CheckSeverity.ERROR)
+      check('UnusedVariable', CheckSeverity.ERROR)
     }
   }
 
@@ -103,26 +106,29 @@ subprojects {
       }
     }
 
-    project.apply plugin: 'com.github.sherter.google-java-format'
-    googleJavaFormat {
-      toolVersion = '1.7'
+    // google-java-format only works on JDK 11 or newer.
+    if (Jvm.current().javaVersion.isJava11Compatible()) {
+      project.apply plugin: 'com.github.sherter.google-java-format'
+      googleJavaFormat {
+        toolVersion = '1.8'
 
-      // By default, the GJF plugin includes all Java folders inside the project directory. This
-      // does not work well with nested projects, especially when you want to exclude them.
-      source = sourceSets*.allJava
-    }
-    afterEvaluate {
-      def verify = tasks.getByName('verifyGoogleJavaFormat')
-      tasks.getByName('check').dependsOn(verify)
-      def prompt = tasks.create('promptGoogleJavaFormat') {
-        doLast {
-          println()
-          println('To automatically format, run "./gradlew googleJavaFormat"')
-          println()
-        }
-        onlyIf { verify.state.failure != null }
+        // By default, the GJF plugin includes all Java folders inside the project directory. This
+        // does not work well with nested projects, especially when you want to exclude them.
+        source = sourceSets*.allJava
       }
-      verify.finalizedBy(prompt)
+      afterEvaluate {
+        def verify = tasks.getByName('verifyGoogleJavaFormat')
+        tasks.getByName('check').dependsOn(verify)
+        def prompt = tasks.create('promptGoogleJavaFormat') {
+          doLast {
+            println()
+            println('To automatically format, run "./gradlew googleJavaFormat"')
+            println()
+          }
+          onlyIf { verify.state.failure != null }
+        }
+        verify.finalizedBy(prompt)
+      }
     }
   }
 

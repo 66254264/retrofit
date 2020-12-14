@@ -39,14 +39,14 @@ class Platform {
   }
 
   private static Platform findPlatform() {
-    try {
-      Class.forName("android.os.Build");
-      if (Build.VERSION.SDK_INT != 0) {
+    switch (System.getProperty("java.vm.name")) {
+      case "Dalvik":
         return new Android();
-      }
-    } catch (ClassNotFoundException ignored) {
+      case "RoboVM":
+        return new Platform(false);
+      default:
+        return new Platform(true);
     }
-    return new Platform(true);
   }
 
   private final boolean hasJava8Types;
