@@ -15,13 +15,14 @@
  */
 package retrofit2.adapter.rxjava2;
 
-import static org.assertj.core.api.Assertions.assertThat;
+import static com.google.common.truth.Truth.assertThat;
 
 import io.reactivex.Completable;
 import io.reactivex.CompletableObserver;
 import io.reactivex.disposables.Disposable;
 import io.reactivex.exceptions.CompositeException;
 import io.reactivex.exceptions.Exceptions;
+import io.reactivex.exceptions.UndeliverableException;
 import io.reactivex.plugins.RxJavaPlugins;
 import java.util.concurrent.atomic.AtomicReference;
 import okhttp3.mockwebserver.MockResponse;
@@ -82,7 +83,9 @@ public final class CompletableThrowingTest {
               }
             });
 
-    assertThat(errorRef.get()).isSameAs(e);
+    Throwable error = errorRef.get();
+    assertThat(error).isInstanceOf(UndeliverableException.class);
+    assertThat(error).hasCauseThat().isSameInstanceAs(e);
   }
 
   @Test

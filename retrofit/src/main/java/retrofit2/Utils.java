@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import javax.annotation.Nullable;
+import kotlin.Unit;
 import okhttp3.ResponseBody;
 import okio.Buffer;
 
@@ -43,6 +44,7 @@ final class Utils {
     return methodError(method, null, message, args);
   }
 
+  @SuppressWarnings("AnnotateFormatMethod")
   static RuntimeException methodError(
       Method method, @Nullable Throwable cause, String message, Object... args) {
     message = String.format(message, args);
@@ -57,11 +59,13 @@ final class Utils {
 
   static RuntimeException parameterError(
       Method method, Throwable cause, int p, String message, Object... args) {
-    return methodError(method, cause, message + " (parameter #" + (p + 1) + ")", args);
+    String paramDesc = Platform.reflection.describeMethodParameter(method, p);
+    return methodError(method, cause, message + " (" + paramDesc + ")", args);
   }
 
   static RuntimeException parameterError(Method method, int p, String message, Object... args) {
-    return methodError(method, message + " (parameter #" + (p + 1) + ")", args);
+    String paramDesc = Platform.reflection.describeMethodParameter(method, p);
+    return methodError(method, message + " (" + paramDesc + ")", args);
   }
 
   static Class<?> getRawType(Type type) {
@@ -115,9 +119,12 @@ final class Utils {
       ParameterizedType pb = (ParameterizedType) b;
       Object ownerA = pa.getOwnerType();
       Object ownerB = pb.getOwnerType();
-      return (ownerA == ownerB || (ownerA != null && ownerA.equals(ownerB)))
-          && pa.getRawType().equals(pb.getRawType())
-          && Arrays.equals(pa.getActualTypeArguments(), pb.getActualTypeArguments());
+      boolean ownersAreEqual = ownerA == ownerB || (ownerA != null && ownerA.equals(ownerB));
+      boolean rawTypesAreEqual = pa.getRawType().equals(pb.getRawType());
+      boolean typeArgumentsAreEqual =
+          Arrays.equals(pa.getActualTypeArguments(), pb.getActualTypeArguments());
+
+      return ownersAreEqual && rawTypesAreEqual && typeArgumentsAreEqual;
 
     } else if (a instanceof GenericArrayType) {
       if (!(b instanceof GenericArrayType)) return false;
@@ -532,5 +539,19 @@ final class Utils {
     } else if (t instanceof LinkageError) {
       throw (LinkageError) t;
     }
+  }
+
+  /** Not volatile because we don't mind multiple threads discovering this. */
+  private static boolean checkForKotlinUnit = true;
+
+  static boolean isUnit(Type type) {
+    if (checkForKotlinUnit) {
+      try {
+        return type == Unit.class;
+      } catch (NoClassDefFoundError ignored) {
+        checkForKotlinUnit = false;
+      }
+    }
+    return false;
   }
 }

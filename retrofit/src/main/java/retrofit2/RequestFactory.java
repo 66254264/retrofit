@@ -63,10 +63,11 @@ import retrofit2.http.Tag;
 import retrofit2.http.Url;
 
 final class RequestFactory {
-  static RequestFactory parseAnnotations(Retrofit retrofit, Method method) {
-    return new Builder(retrofit, method).build();
+  static RequestFactory parseAnnotations(Retrofit retrofit, Class<?> service, Method method) {
+    return new Builder(retrofit, service, method).build();
   }
 
+  private final Class<?> service;
   private final Method method;
   private final HttpUrl baseUrl;
   final String httpMethod;
@@ -80,6 +81,7 @@ final class RequestFactory {
   final boolean isKotlinSuspendFunction;
 
   RequestFactory(Builder builder) {
+    service = builder.service;
     method = builder.method;
     baseUrl = builder.retrofit.baseUrl;
     httpMethod = builder.httpMethod;
@@ -93,7 +95,7 @@ final class RequestFactory {
     isKotlinSuspendFunction = builder.isKotlinSuspendFunction;
   }
 
-  okhttp3.Request create(Object[] args) throws IOException {
+  okhttp3.Request create(@Nullable Object instance, Object[] args) throws IOException {
     @SuppressWarnings("unchecked") // It is an error to invoke a method with the wrong arg types.
     ParameterHandler<Object>[] handlers = (ParameterHandler<Object>[]) parameterHandlers;
 
@@ -129,7 +131,10 @@ final class RequestFactory {
       handlers[p].apply(requestBuilder, args[p]);
     }
 
-    return requestBuilder.get().tag(Invocation.class, new Invocation(method, argumentList)).build();
+    return requestBuilder
+        .get()
+        .tag(Invocation.class, new Invocation(service, instance, method, argumentList))
+        .build();
   }
 
   /**
@@ -144,6 +149,7 @@ final class RequestFactory {
     private static final Pattern PARAM_NAME_REGEX = Pattern.compile(PARAM);
 
     final Retrofit retrofit;
+    final Class<?> service;
     final Method method;
     final Annotation[] methodAnnotations;
     final Annotation[][] parameterAnnotationsArray;
@@ -168,8 +174,9 @@ final class RequestFactory {
     @Nullable ParameterHandler<?>[] parameterHandlers;
     boolean isKotlinSuspendFunction;
 
-    Builder(Retrofit retrofit, Method method) {
+    Builder(Retrofit retrofit, Class<?> service, Method method) {
       this.retrofit = retrofit;
+      this.service = service;
       this.method = method;
       this.methodAnnotations = method.getAnnotations();
       this.parameterTypes = method.getGenericParameterTypes();
@@ -241,11 +248,12 @@ final class RequestFactory {
         HTTP http = (HTTP) annotation;
         parseHttpMethodAndPath(http.method(), http.path(), http.hasBody());
       } else if (annotation instanceof retrofit2.http.Headers) {
-        String[] headersToParse = ((retrofit2.http.Headers) annotation).value();
+        retrofit2.http.Headers headers = (retrofit2.http.Headers) annotation;
+        String[] headersToParse = headers.value();
         if (headersToParse.length == 0) {
           throw methodError(method, "@Headers annotation is empty.");
         }
-        headers = parseHeaders(headersToParse);
+        this.headers = parseHeaders(headersToParse, headers.allowUnsafeNonAsciiValues());
       } else if (annotation instanceof Multipart) {
         if (isFormEncoded) {
           throw methodError(method, "Only one encoding annotation is allowed.");
@@ -293,7 +301,7 @@ final class RequestFactory {
       this.relativeUrlParamNames = parsePathParameters(value);
     }
 
-    private Headers parseHeaders(String[] headers) {
+    private Headers parseHeaders(String[] headers, boolean allowUnsafeNonAsciiValues) {
       Headers.Builder builder = new Headers.Builder();
       for (String header : headers) {
         int colon = header.indexOf(':');
@@ -309,6 +317,8 @@ final class RequestFactory {
           } catch (IllegalArgumentException e) {
             throw methodError(method, e, "Malformed content type: %s", headerValue);
           }
+        } else if (allowUnsafeNonAsciiValues) {
+          builder.addUnsafeNonAscii(headerName, headerValue);
         } else {
           builder.add(headerName, headerValue);
         }
@@ -345,6 +355,7 @@ final class RequestFactory {
               return null;
             }
           } catch (NoClassDefFoundError ignored) {
+            // Ignored
           }
         }
         throw parameterError(method, p, "No Retrofit annotation found.");
@@ -523,15 +534,17 @@ final class RequestFactory {
           ParameterizedType parameterizedType = (ParameterizedType) type;
           Type iterableType = Utils.getParameterUpperBound(0, parameterizedType);
           Converter<?, String> converter = retrofit.stringConverter(iterableType, annotations);
-          return new ParameterHandler.Header<>(name, converter).iterable();
+          return new ParameterHandler.Header<>(name, converter, header.allowUnsafeNonAsciiValues())
+              .iterable();
         } else if (rawParameterType.isArray()) {
           Class<?> arrayComponentType = boxIfPrimitive(rawParameterType.getComponentType());
           Converter<?, String> converter =
               retrofit.stringConverter(arrayComponentType, annotations);
-          return new ParameterHandler.Header<>(name, converter).array();
+          return new ParameterHandler.Header<>(name, converter, header.allowUnsafeNonAsciiValues())
+              .array();
         } else {
           Converter<?, String> converter = retrofit.stringConverter(type, annotations);
-          return new ParameterHandler.Header<>(name, converter);
+          return new ParameterHandler.Header<>(name, converter, header.allowUnsafeNonAsciiValues());
         }
 
       } else if (annotation instanceof HeaderMap) {
@@ -542,7 +555,7 @@ final class RequestFactory {
         validateResolvableType(p, type);
         Class<?> rawParameterType = Utils.getRawType(type);
         if (!Map.class.isAssignableFrom(rawParameterType)) {
-          throw parameterError(method, p, "@HeaderMap parameter type must be Map.");
+          throw parameterError(method, p, "@HeaderMap parameter type must be Map or Headers.");
         }
         Type mapType = Utils.getSupertype(type, rawParameterType, Map.class);
         if (!(mapType instanceof ParameterizedType)) {
@@ -557,7 +570,8 @@ final class RequestFactory {
         Type valueType = Utils.getParameterUpperBound(1, parameterizedType);
         Converter<?, String> valueConverter = retrofit.stringConverter(valueType, annotations);
 
-        return new ParameterHandler.HeaderMap<>(method, p, valueConverter);
+        return new ParameterHandler.HeaderMap<>(
+            method, p, valueConverter, ((HeaderMap) annotation).allowUnsafeNonAsciiValues());
 
       } else if (annotation instanceof Field) {
         validateResolvableType(p, type);
@@ -796,8 +810,8 @@ final class RequestFactory {
                 p,
                 "@Tag type "
                     + tagType.getName()
-                    + " is duplicate of parameter #"
-                    + (i + 1)
+                    + " is duplicate of "
+                    + Platform.reflection.describeMethodParameter(method, i)
                     + " and would always overwrite its value.");
           }
         }

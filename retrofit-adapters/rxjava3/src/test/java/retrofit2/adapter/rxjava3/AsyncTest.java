@@ -15,9 +15,9 @@
  */
 package retrofit2.adapter.rxjava3;
 
+import static com.google.common.truth.Truth.assertThat;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
@@ -56,7 +56,7 @@ public final class AsyncTest {
   }
 
   private Service service;
-  private List<Throwable> uncaughtExceptions = new ArrayList<>();
+  private final List<Throwable> uncaughtExceptions = new ArrayList<>();
 
   @Before
   public void setUp() {
@@ -133,7 +133,7 @@ public final class AsyncTest {
             });
 
     latch.await(1, SECONDS);
-    assertThat(errorRef.get().getCause()).isSameAs(e);
+    assertThat(errorRef.get()).hasCauseThat().isSameInstanceAs(e);
   }
 
   @Test

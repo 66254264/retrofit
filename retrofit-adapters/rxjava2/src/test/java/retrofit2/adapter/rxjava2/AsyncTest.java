@@ -15,9 +15,9 @@
  */
 package retrofit2.adapter.rxjava2;
 
+import static com.google.common.truth.Truth.assertThat;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static okhttp3.mockwebserver.SocketPolicy.DISCONNECT_AFTER_REQUEST;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
@@ -26,6 +26,7 @@ import static org.junit.Assert.assertTrue;
 import io.reactivex.Completable;
 import io.reactivex.exceptions.CompositeException;
 import io.reactivex.exceptions.Exceptions;
+import io.reactivex.exceptions.UndeliverableException;
 import io.reactivex.observers.TestObserver;
 import io.reactivex.plugins.RxJavaPlugins;
 import java.io.IOException;
@@ -56,7 +57,7 @@ public final class AsyncTest {
   }
 
   private Service service;
-  private List<Throwable> uncaughtExceptions = new ArrayList<>();
+  private final List<Throwable> uncaughtExceptions = new ArrayList<>();
 
   @Before
   public void setUp() {
@@ -133,7 +134,10 @@ public final class AsyncTest {
             });
 
     latch.await(1, SECONDS);
-    assertThat(errorRef.get()).isSameAs(e);
+
+    Throwable error = errorRef.get();
+    assertThat(error).isInstanceOf(UndeliverableException.class);
+    assertThat(error).hasCauseThat().isSameInstanceAs(e);
   }
 
   @Test

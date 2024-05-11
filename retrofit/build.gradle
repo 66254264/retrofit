@@ -2,27 +2,53 @@ apply plugin: 'java-library'
 apply plugin: 'org.jetbrains.kotlin.jvm'
 apply plugin: 'com.vanniktech.maven.publish'
 
+def addMultiReleaseSourceSet(int version) {
+  def sourceSet = sourceSets.create("java$version")
+  sourceSet.java.srcDir("src/main/java$version")
+
+  // Propagate dependencies to be visible to this version's source set.
+  configurations.getByName("java${version}Implementation").extendsFrom(configurations.getByName('implementation'))
+  configurations.getByName("java${version}Api").extendsFrom(configurations.getByName('api'))
+  configurations.getByName("java${version}CompileOnly").extendsFrom(configurations.getByName('compileOnly'))
+
+  // Allow types in the main source set to be visible to this version's source set.
+  dependencies.add("java${version}Implementation", sourceSets.getByName("main").output)
+
+  tasks.named("compileJava${version}Java", JavaCompile) {
+    javaCompiler = javaToolchains.compilerFor {
+      languageVersion = JavaLanguageVersion.of(version)
+      vendor = JvmVendorSpec.AZUL
+    }
+  }
+
+  tasks.named('jar', Jar) {
+    from(sourceSet.output) {
+      into("META-INF/versions/$version")
+    }
+  }
+}
+
+addMultiReleaseSourceSet(14)
+addMultiReleaseSourceSet(16)
+
 dependencies {
-  api deps.okhttp
+  api libs.okhttp
 
-  compileOnly deps.android
-  compileOnly deps.kotlinStdLib
-  compileOnly deps.kotlinCoroutines
+  compileOnly libs.android
+  compileOnly libs.kotlin.stdLib
+  compileOnly libs.kotlinCoroutines
 
-  compileOnly deps.animalSnifferAnnotations
-  compileOnly deps.findBugsAnnotations
+  compileOnly libs.animalSnifferAnnotations
+  compileOnly libs.findBugsAnnotations
+}
 
-  testImplementation project(':retrofit:test-helpers')
-  testImplementation deps.junit
-  testImplementation deps.assertj
-  testImplementation deps.guava
-  testImplementation deps.mockwebserver
-  testImplementation deps.kotlinStdLib
-  testImplementation deps.kotlinCoroutines
+javadoc {
+  exclude('retrofit2/internal/**')
 }
 
 jar {
   manifest {
-    attributes  'Automatic-Module-Name': 'retrofit2'
+    attributes 'Automatic-Module-Name': 'retrofit2'
+    attributes 'Multi-Release': 'true'
   }
 }
